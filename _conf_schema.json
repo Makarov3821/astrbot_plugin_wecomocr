@@ -1,0 +1,69 @@
+{
+  "allowed_sources": {
+    "description": "允许使用插件的精确消息来源（unified_msg_origin），格式通常为 平台:消息类型:会话ID；留空时拒绝全部来源",
+    "type": "list",
+    "default": [],
+    "items": {"type": "string"}
+  },
+  "allowed_sender_ids": {
+    "description": "可选的发送者 ID 白名单；留空表示允许白名单来源中的所有发送者",
+    "type": "list",
+    "default": [],
+    "items": {"type": "string"}
+  },
+  "baidu_api_key": {
+    "description": "百度 AI Studio PaddleOCR API Key",
+    "type": "string",
+    "default": ""
+  },
+  "baidu_model": {
+    "description": "百度 PaddleOCR 模型名称",
+    "type": "string",
+    "default": "PaddleOCR-VL-1.6"
+  },
+  "baidu_job_url": {
+    "description": "百度 PaddleOCR 异步任务接口；通常无需修改",
+    "type": "string",
+    "default": "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+  },
+  "wps_script_url": {
+    "description": "WPS AirScript 同步任务地址，必须为 https://365.kdocs.cn/.../sync_task",
+    "type": "string",
+    "default": ""
+  },
+  "airscript_token": {
+    "description": "WPS AirScript-Token",
+    "type": "string",
+    "default": ""
+  },
+  "ocr_poll_interval": {
+    "description": "OCR 任务轮询间隔（秒）",
+    "type": "float",
+    "default": 5.0
+  },
+  "ocr_job_timeout": {
+    "description": "单个 OCR 任务总超时（秒）",
+    "type": "int",
+    "default": 600
+  },
+  "ocr_request_timeout": {
+    "description": "OCR 单次 HTTP 请求超时（秒）",
+    "type": "int",
+    "default": 60
+  },
+  "wps_request_timeout": {
+    "description": "WPS 提交请求超时（秒）",
+    "type": "int",
+    "default": 30
+  },
+  "session_timeout_minutes": {
+    "description": "等待用户确认的会话超时（分钟）",
+    "type": "int",
+    "default": 30
+  },
+  "debug": {
+    "description": "记录 OCR 轮询进度和被忽略的来源；日志不会输出密钥",
+    "type": "bool",
+    "default": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "astrbot_plugin_wecomocr": {
+    "display_name": "离校清单 OCR 填表",
+    "desc": "通过百度 PaddleOCR 识别单份离校清单，经用户确认后调用 WPS AirScript 填表。",
+    "author": "Makarov3821",
+    "repo": "https://github.com/Makarov3821/astrbot_plugin_wecomocr",
+    "tags": [
+      "ocr",
+      "paddleocr",
+      "wps",
+      "workflow"
+    ],
+    "social_link": "https://github.com/Makarov3821",
+    "category": "productivity"
+  }
+}

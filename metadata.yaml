@@ -1,6 +1,6 @@
 name: astrbot_plugin_wecomocr
 display_name: 离校清单 OCR 填表
 desc: 严格执行单文件 OCR、人工确认和 WPS AirScript 填表流程。
-version: v1.0.0
+version: v1.3.0
 author: zyl
 repo: ""

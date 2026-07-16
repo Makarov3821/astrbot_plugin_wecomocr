@@ -13,20 +13,26 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import File, Image
 from astrbot.api.star import Context, Star, register
 
+from .file_cache import ManagedFileCache
+from .intent_parser import build_intent_prompt, parse_intent_response
 from .ocr_service import SUPPORTED_SUFFIXES, ocr_file
 from .workflow import (
+    apply_review_changes,
+    build_wps_data,
     format_fields,
+    is_exit_command,
     is_submit_command,
+    prepare_ocr_fields,
     parse_modifications,
-    select_fields,
     submit_to_wps,
+    validate_modification_changes,
     validate_wps_url,
 )
 
 
 GUIDE = (
     "请一次上传一张 JPG、JPEG、PNG 图片或 PDF。识别后我会列出离校信息；"
-    "你可以回复“姓名改为张三”（多个修改用换行或分号分隔），确认后回复“提交”。"
+    "你可以回复“姓名改为张三”（多个修改用逗号或换行分隔），确认后回复“提交”；需要放弃本轮时回复“退出”。"
 )
 
 
@@ -34,13 +40,15 @@ GUIDE = (
 class ReviewSession:
     data: dict[str, str]
     updated_at: float
+    cancellation_date_initialized: bool
+    error_count: int = 0
 
 
 @register(
     "astrbot_plugin_wecomocr",
     "zyl",
     "派遣人员离校清单 OCR 确认与 WPS 填表",
-    "1.0.0",
+    "1.3.0",
 )
 class WeComOCRPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -48,8 +56,19 @@ class WeComOCRPlugin(Star):
         self.config = config
         self._sessions: dict[str, ReviewSession] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._file_cache = ManagedFileCache(
+            retention_hours=float(self._config("cache_retention_hours", 1.0))
+        )
+        self._cache_tasks: set[asyncio.Task[None]] = set()
+        self._cache_cleanup_task: asyncio.Task[None] | None = None
 
     async def initialize(self) -> None:
+        deleted = await asyncio.to_thread(self._file_cache.cleanup_expired)
+        if deleted:
+            logger.info(f"WeComOCR 已清理 {deleted} 个过期缓存文件")
+        self._cache_cleanup_task = asyncio.create_task(
+            self._cache_cleanup_loop(), name="wecomocr-cache-cleanup"
+        )
         errors = self._configuration_errors()
         if errors:
             logger.warning("WeComOCR 插件配置未完成：%s", "；".join(errors))
@@ -98,6 +117,73 @@ class WeComOCRPlugin(Star):
         except ValueError as exc:
             errors.append(str(exc))
         return errors
+
+    async def _cache_cleanup_loop(self) -> None:
+        interval_minutes = max(1.0, float(
+            self._config("cache_cleanup_interval_minutes", 10.0)
+        ))
+        try:
+            while True:
+                await asyncio.sleep(interval_minutes * 60)
+                try:
+                    await asyncio.to_thread(self._file_cache.cleanup_expired)
+                except Exception as exc:
+                    logger.warning(f"WeComOCR 缓存清理失败：{exc}")
+        except asyncio.CancelledError:
+            raise
+
+    def _schedule_cache_deletion(self, path: str) -> None:
+        async def delete_later() -> None:
+            try:
+                delay = await asyncio.to_thread(
+                    self._file_cache.seconds_until_expiry, path
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                await asyncio.to_thread(self._file_cache.delete, path)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(f"WeComOCR 缓存文件删除失败：{exc}")
+
+        task = asyncio.create_task(delete_later(), name="wecomocr-cache-delete")
+        self._cache_tasks.add(task)
+        task.add_done_callback(self._cache_tasks.discard)
+
+    async def _parse_llm_modifications(
+        self, event: AstrMessageEvent, text: str, data: dict[str, str]
+    ) -> dict[str, str]:
+        if not bool(self._config("enable_llm_intent_parsing", True)):
+            return {}
+        provider_id = await self.context.get_current_chat_provider_id(
+            umo=event.unified_msg_origin
+        )
+        if not provider_id:
+            return {}
+        timeout = max(1, int(self._config("llm_intent_timeout", 30)))
+        response = await asyncio.wait_for(
+            self.context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=build_intent_prompt(text[:1000], data),
+            ),
+            timeout=timeout,
+        )
+        changes = parse_intent_response(response.completion_text)
+        return validate_modification_changes(changes)
+
+    def _review_error(
+        self, review: ReviewSession, message: str
+    ) -> str:
+        review.error_count += 1
+        review.updated_at = time.monotonic()
+        lines = [message, "当前识别结果仍然保留，请重新输入。"]
+        threshold = max(1, int(self._config("review_error_hint_threshold", 3)))
+        if review.error_count >= threshold:
+            lines.append(
+                "使用提示：修改请回复“字段改为值”（多个修改用逗号或换行分隔）；"
+                "确认请回复“提交”；放弃本轮请回复“退出”。"
+            )
+        return "\n".join(lines)
 
     def _expire_session(self, key: str) -> bool:
         session = self._sessions.get(key)
@@ -161,14 +247,34 @@ class WeComOCRPlugin(Star):
             review = self._sessions.get(key)
 
             if review is not None:
-                if attachments:
+                if is_exit_command(text):
                     self._sessions.pop(key, None)
-                    yield event.plain_result("确认阶段不能再次上传文件，本轮已清空。\n" + GUIDE)
+                    yield event.plain_result(
+                        "已退出并清空本轮信息，可以重新上传一份文件。"
+                    )
+                    return
+                if attachments:
+                    yield event.plain_result(
+                        self._review_error(
+                            review,
+                            "当前正在确认已识别的信息，不能再次上传文件。",
+                        )
+                    )
                     return
                 if is_submit_command(text):
                     if self._configuration_errors():
-                        self._sessions.pop(key, None)
-                        yield event.plain_result("插件配置不完整，无法提交；本轮已清空。请联系管理员。")
+                        yield event.plain_result(
+                            "插件配置不完整，暂时无法提交；本轮信息仍然保留，请联系管理员。"
+                        )
+                        return
+                    try:
+                        build_wps_data(review.data)
+                    except ValueError as exc:
+                        yield event.plain_result(
+                            self._review_error(
+                                review, f"无法提交：{exc}。请先修改对应字段。"
+                            )
+                        )
                         return
                     try:
                         await asyncio.to_thread(self._submit, review.data)
@@ -183,19 +289,39 @@ class WeComOCRPlugin(Star):
                 try:
                     changes = parse_modifications(text)
                 except ValueError as exc:
-                    review.updated_at = time.monotonic()
-                    yield event.plain_result(f"修改格式不正确：{exc}\n请重新修改，或回复“提交”。")
+                    yield event.plain_result(
+                        self._review_error(review, f"修改格式不正确：{exc}")
+                    )
                     return
+                if not changes:
+                    try:
+                        changes = await self._parse_llm_modifications(
+                            event, text, review.data
+                        )
+                    except Exception as exc:
+                        logger.warning(f"WeComOCR LLM 修改意图解析失败：{exc}")
+                        changes = {}
                 if changes:
-                    review.data.update(changes)
+                    (
+                        review.data,
+                        review.cancellation_date_initialized,
+                    ) = apply_review_changes(
+                        review.data,
+                        changes,
+                        review.cancellation_date_initialized,
+                    )
                     review.updated_at = time.monotonic()
+                    review.error_count = 0
                     yield event.plain_result(
                         "已修改，请再次确认：\n" + format_fields(review.data)
                         + "\n\n继续修改请使用“字段改为值”；确认无误请回复“提交”。"
                     )
                     return
-                self._sessions.pop(key, None)
-                yield event.plain_result("该消息不属于信息修改或提交指令，本轮已拒绝并清空。\n" + GUIDE)
+                yield event.plain_result(
+                    self._review_error(
+                        review, "该消息不是有效的信息修改、提交或退出指令。"
+                    )
+                )
                 return
 
             if not attachments:
@@ -223,20 +349,35 @@ class WeComOCRPlugin(Star):
                 suffix = Path(name).suffix.lower() or Path(path).suffix.lower()
                 if suffix not in SUPPORTED_SUFFIXES:
                     raise ValueError("仅支持 JPG、JPEG、PNG 图片或 PDF")
-                result = await asyncio.to_thread(self._ocr, path)
-                data = select_fields(result)
+                cached_path = await asyncio.to_thread(
+                    self._file_cache.store, path, suffix
+                )
+                self._schedule_cache_deletion(cached_path)
+                result = await asyncio.to_thread(self._ocr, cached_path)
+                data = prepare_ocr_fields(result)
             except Exception as exc:
                 logger.exception("WeComOCR OCR 处理失败：%s", exc)
                 self._sessions.pop(key, None)
                 yield event.plain_result("文件识别失败，本轮已清空。请确认文件格式和内容后重新上传；如仍失败请联系管理员。")
                 return
-            self._sessions[key] = ReviewSession(data=data, updated_at=time.monotonic())
+            self._sessions[key] = ReviewSession(
+                data=data,
+                updated_at=time.monotonic(),
+                cancellation_date_initialized=data["邮箱注销日期"] != "无",
+            )
             yield event.plain_result(
                 ignored_notice + "识别完成，请确认以下信息：\n" + format_fields(data)
-                + "\n\n需要修改时回复“字段改为值”，多个修改用换行或分号分隔；确认无误请回复“提交”。"
+                + "\n\n需要修改时回复“字段改为值”，多个修改用逗号或换行分隔；确认无误请回复“提交”。"
             )
             return
 
     async def terminate(self) -> None:
+        tasks = list(self._cache_tasks)
+        if self._cache_cleanup_task is not None:
+            tasks.append(self._cache_cleanup_task)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._sessions.clear()
         self._locks.clear()

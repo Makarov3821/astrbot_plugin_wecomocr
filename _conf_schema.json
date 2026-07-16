@@ -61,6 +61,31 @@
     "type": "int",
     "default": 30
   },
+  "enable_llm_intent_parsing": {
+    "description": "确定性解析失败时，使用当前会话模型识别自然语言字段修改；会向模型发送当前七字段和用户消息",
+    "type": "bool",
+    "default": true
+  },
+  "llm_intent_timeout": {
+    "description": "LLM 修改意图识别超时（秒）",
+    "type": "int",
+    "default": 30
+  },
+  "cache_retention_hours": {
+    "description": "插件处理缓存的保存小时数，最少 1 小时，可延长",
+    "type": "float",
+    "default": 1.0
+  },
+  "cache_cleanup_interval_minutes": {
+    "description": "过期文件兜底扫描间隔（分钟）",
+    "type": "float",
+    "default": 10.0
+  },
+  "review_error_hint_threshold": {
+    "description": "确认阶段连续出错多少次后附加完整使用提示",
+    "type": "int",
+    "default": 3
+  },
   "debug": {
     "description": "记录 OCR 轮询进度和被忽略的来源；日志不会输出密钥",
     "type": "bool",

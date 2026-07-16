@@ -170,7 +170,6 @@ class WeComOCRPlugin(Star):
                         self._sessions.pop(key, None)
                         yield event.plain_result("插件配置不完整，无法提交；本轮已清空。请联系管理员。")
                         return
-                    yield event.plain_result("正在提交 WPS 表格，请稍候……")
                     try:
                         await asyncio.to_thread(self._submit, review.data)
                     except Exception as exc:
@@ -212,15 +211,18 @@ class WeComOCRPlugin(Star):
                 yield event.plain_result("插件配置不完整，暂时无法处理文件，请联系管理员。")
                 return
             first = attachments[0]
+            ignored_notice = ""
             if len(attachments) > 1:
-                yield event.plain_result(f"一次只能处理一个文件；将处理第 1 个，其余 {len(attachments) - 1} 个已忽略。")
+                ignored_notice = (
+                    f"一次只能处理一个文件；已处理第 1 个，"
+                    f"其余 {len(attachments) - 1} 个已忽略。\n\n"
+                )
             try:
                 path = await self._attachment_path(first)
                 name = self._attachment_name(first, path)
                 suffix = Path(name).suffix.lower() or Path(path).suffix.lower()
                 if suffix not in SUPPORTED_SUFFIXES:
                     raise ValueError("仅支持 JPG、JPEG、PNG 图片或 PDF")
-                yield event.plain_result(f"正在识别 {name}，请稍候……")
                 result = await asyncio.to_thread(self._ocr, path)
                 data = select_fields(result)
             except Exception as exc:
@@ -230,9 +232,10 @@ class WeComOCRPlugin(Star):
                 return
             self._sessions[key] = ReviewSession(data=data, updated_at=time.monotonic())
             yield event.plain_result(
-                "识别完成，请确认以下信息：\n" + format_fields(data)
+                ignored_notice + "识别完成，请确认以下信息：\n" + format_fields(data)
                 + "\n\n需要修改时回复“字段改为值”，多个修改用换行或分号分隔；确认无误请回复“提交”。"
             )
+            return
 
     async def terminate(self) -> None:
         self._sessions.clear()

@@ -28,6 +28,7 @@ class WorkflowTests(unittest.TestCase):
         data = prepare_ocr_fields(
             {
                 "姓名": "张三",
+                "复旦邮箱": "zhangsan.edu.cn",
                 "离职日期": "2026-07-16",
                 "保留邮箱": "否",
             }

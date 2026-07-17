@@ -48,7 +48,7 @@ class ReviewSession:
     "astrbot_plugin_wecomocr",
     "zyl",
     "派遣人员离校清单 OCR 确认与 WPS 填表",
-    "1.3.0",
+    "1.3.1",
 )
 class WeComOCRPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -363,7 +363,10 @@ class WeComOCRPlugin(Star):
             self._sessions[key] = ReviewSession(
                 data=data,
                 updated_at=time.monotonic(),
-                cancellation_date_initialized=data["邮箱注销日期"] != "无",
+                cancellation_date_initialized=(
+                    bool(data["邮箱注销日期"])
+                    and data["邮箱注销日期"] != "无"
+                ),
             )
             yield event.plain_result(
                 ignored_notice + "识别完成，请确认以下信息：\n" + format_fields(data)

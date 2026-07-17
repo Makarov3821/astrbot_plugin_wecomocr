@@ -22,6 +22,17 @@ FIELDS = (
     "邮箱注销日期",
 )
 FIELD_LOOKUP = {field.casefold(): field for field in FIELDS}
+FIELD_LOOKUP.update({
+    "邮箱": "复旦邮箱",
+    "邮件": "复旦邮箱",
+    "email": "复旦邮箱",
+    "fudan email": "复旦邮箱",
+})
+FIELD_LABELS = sorted(FIELD_LOOKUP, key=len, reverse=True)
+EMAIL_EMPTY_VALUES = {
+    "无", "无邮箱", "没有邮箱", "暂无邮箱", "空", "留空",
+    "none", "null", "n/a",
+}
 EXIT_PHRASES = {
     "退出",
     "取消",
@@ -86,6 +97,12 @@ def calculate_email_cancellation_date(departure_date: str) -> str:
 
 def _normalize_manual_value(field: str, value: str) -> str:
     value = re.sub(r"\s+", " ", value).strip().strip("。；;")
+    if field == "复旦邮箱" and value.casefold() in EMAIL_EMPTY_VALUES:
+        return "无"
+    if field == "邮箱注销日期" and value.casefold() in {
+        "空", "留空", "无", "none", "null", "n/a",
+    }:
+        return ""
     if not value or len(value) > 200:
         raise ValueError(f"{field}的值为空或过长")
 
@@ -130,7 +147,7 @@ def validate_modification_changes(
 
 def parse_modifications(text: str) -> dict[str, str]:
     """严格解析一个或多个“字段改为值”，整条消息必须全部匹配。"""
-    field_pattern = "|".join(map(re.escape, FIELDS))
+    field_pattern = "|".join(map(re.escape, FIELD_LABELS))
     parts = re.split(
         rf"[\n；;]+|[，,](?=\s*(?:请\s*)?(?:把|将)?\s*(?:修改\s*)?(?:{field_pattern}))",
         (text or "").strip(),
@@ -155,9 +172,18 @@ def parse_modifications(text: str) -> dict[str, str]:
 
 
 def select_fields(data: Mapping[str, Any]) -> dict[str, str]:
-    selected = {field: str(data.get(field, "无") or "无") for field in FIELDS}
+    selected = {
+        field: str(data.get(field, "无") or "无")
+        for field in FIELDS
+        if field != "邮箱注销日期"
+    }
+    raw_cancellation_date = data.get("邮箱注销日期", "")
+    selected["邮箱注销日期"] = (
+        ""
+        if raw_cancellation_date in {None, ""}
+        else normalize_business_date(str(raw_cancellation_date))
+    )
     selected["离职日期"] = normalize_business_date(selected["离职日期"])
-    selected["邮箱注销日期"] = normalize_business_date(selected["邮箱注销日期"])
     if selected["保留邮箱"] not in {"是", "否"}:
         selected["保留邮箱"] = "否"
     return selected
@@ -166,9 +192,12 @@ def select_fields(data: Mapping[str, Any]) -> dict[str, str]:
 def prepare_ocr_fields(data: Mapping[str, Any]) -> dict[str, str]:
     """生成供用户确认的七字段字典。"""
     selected = select_fields(data)
-    selected["邮箱注销日期"] = calculate_email_cancellation_date(
-        selected["离职日期"]
-    )
+    if selected["复旦邮箱"] == "无":
+        selected["邮箱注销日期"] = ""
+    else:
+        selected["邮箱注销日期"] = calculate_email_cancellation_date(
+            selected["离职日期"]
+        )
     return selected
 
 
@@ -180,7 +209,13 @@ def apply_review_changes(
     """合并用户修改，并且最多自动初始化一次邮箱注销日期。"""
     updated = select_fields(data)
     normalized_changes = dict(changes)
-    if "邮箱注销日期" in normalized_changes:
+    email_changed = "复旦邮箱" in normalized_changes
+    new_email = normalized_changes.get("复旦邮箱", updated["复旦邮箱"])
+
+    if new_email == "无":
+        normalized_changes["邮箱注销日期"] = ""
+        cancellation_date_initialized = False
+    elif "邮箱注销日期" in normalized_changes:
         cancellation_date_initialized = True
     elif (
         "离职日期" in normalized_changes
@@ -192,6 +227,14 @@ def apply_review_changes(
         if cancellation_date != "无":
             normalized_changes["邮箱注销日期"] = cancellation_date
             cancellation_date_initialized = True
+    elif email_changed and updated["复旦邮箱"] == "无":
+        cancellation_date = calculate_email_cancellation_date(
+            normalized_changes.get("离职日期", updated["离职日期"])
+        )
+        if cancellation_date != "无":
+            normalized_changes["邮箱注销日期"] = cancellation_date
+            cancellation_date_initialized = True
+
     updated.update(normalized_changes)
     return updated, cancellation_date_initialized
 
@@ -219,12 +262,17 @@ def build_wps_data(data: Mapping[str, Any]) -> dict[str, str]:
     if keep_email == "是":
         wps_data["保留姓名"] = selected["姓名"]
     else:
-        cancellation_date = normalize_business_date(selected["邮箱注销日期"])
-        if cancellation_date == "无":
-            raise ValueError(
-                "保留邮箱为“否”时，必须先填写真实有效的邮箱注销日期"
+        if selected["复旦邮箱"] == "无":
+            wps_data["邮箱注销日期"] = ""
+        else:
+            cancellation_date = normalize_business_date(
+                selected["邮箱注销日期"]
             )
-        wps_data["邮箱注销日期"] = cancellation_date
+            if cancellation_date == "无":
+                raise ValueError(
+                    "保留邮箱为“否”时，必须先填写真实有效的邮箱注销日期"
+                )
+            wps_data["邮箱注销日期"] = cancellation_date
     return wps_data
 
 

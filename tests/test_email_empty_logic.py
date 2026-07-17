@@ -15,6 +15,20 @@ from astrbot_plugin_wecomocr.workflow import (  # noqa: E402
 
 
 class EmailEmptyLogicTests(unittest.TestCase):
+    def test_email_is_lowercased_from_ocr_and_manual_changes(self):
+        data = prepare_ocr_fields(
+            {
+                "复旦邮箱": "TangJiaJun@FUDAN.EDU.CN",
+                "离职日期": "2026.07.16",
+                "保留邮箱": "否",
+            }
+        )
+        self.assertEqual(data["复旦邮箱"], "tangjiajun@fudan.edu.cn")
+        self.assertEqual(
+            parse_modifications("邮箱改为LIU.ZHENXUE@FUDAN.EDU.CN"),
+            {"复旦邮箱": "liu.zhenxue@fudan.edu.cn"},
+        )
+
     def test_email_alias_and_empty_synonyms(self):
         self.assertEqual(
             parse_modifications("邮箱改为无"), {"复旦邮箱": "无"}

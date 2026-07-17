@@ -12,7 +12,7 @@ class ReviewChangeTests(unittest.TestCase):
     def test_first_valid_departure_change_initializes_cancellation_date_once(self):
         initial = {
             "姓名": "张三",
-            "复旦邮箱": "zhangsan.edu.cn",
+            "复旦邮箱": "zhangsan@fudan.edu.cn",
             "离职日期": "无",
             "保留邮箱": "否",
             "邮箱注销日期": "无",
@@ -32,7 +32,7 @@ class ReviewChangeTests(unittest.TestCase):
 
     def test_manual_cancellation_date_is_not_overwritten(self):
         initial = {
-            "复旦邮箱": "zhangsan.edu.cn",
+            "复旦邮箱": "zhangsan@fudan.edu.cn",
             "离职日期": "无",
             "保留邮箱": "否",
             "邮箱注销日期": "无",

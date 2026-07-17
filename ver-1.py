@@ -85,7 +85,7 @@ def normalize_email(email: str) -> str:
     """保留邮箱用户名，并按业务规则统一为 fudan.edu.cn 域名。"""
     if not email or email == "无" or "@" not in email:
         return "无"
-    local_part = email.split("@", 1)[0].strip()
+    local_part = email.split("@", 1)[0].strip().lower()
     local_part = re.sub(r"[^a-zA-Z0-9._%+-]", "", local_part)
     return f"{local_part}@fudan.edu.cn" if local_part else "无"
 

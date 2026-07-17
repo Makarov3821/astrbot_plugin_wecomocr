@@ -183,6 +183,7 @@ def select_fields(data: Mapping[str, Any]) -> dict[str, str]:
         if raw_cancellation_date in {None, ""}
         else normalize_business_date(str(raw_cancellation_date))
     )
+    selected["复旦邮箱"] = normalize_email(selected["复旦邮箱"])
     selected["离职日期"] = normalize_business_date(selected["离职日期"])
     if selected["保留邮箱"] not in {"是", "否"}:
         selected["保留邮箱"] = "否"

@@ -48,7 +48,7 @@ class ReviewSession:
     "astrbot_plugin_wecomocr",
     "zyl",
     "派遣人员离校清单 OCR 确认与 WPS 填表",
-    "1.3.1",
+    "1.4.0",
 )
 class WeComOCRPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -73,7 +73,11 @@ class WeComOCRPlugin(Star):
         if errors:
             logger.warning("WeComOCR 插件配置未完成：%s", "；".join(errors))
         else:
-            logger.info("WeComOCR 插件已加载，来源白名单数量：%d", len(self._allowed_sources()))
+            logger.info(
+                "WeComOCR 插件已加载，平台实例白名单数量：%d，精确来源白名单数量：%d",
+                len(self._allowed_platform_ids()),
+                len(self._allowed_sources()),
+            )
 
     def _config(self, key: str, default: Any = None) -> Any:
         try:
@@ -92,11 +96,32 @@ class WeComOCRPlugin(Star):
     def _allowed_sources(self) -> set[str]:
         return set(self._string_list("allowed_sources"))
 
+    def _allowed_platform_ids(self) -> set[str]:
+        return set(self._string_list("allowed_platform_ids"))
+
+    @staticmethod
+    def _platform_id(event: AstrMessageEvent) -> str:
+        """Return the adapter instance ID, with a fallback for older/test events."""
+        getter = getattr(event, "get_platform_id", None)
+        if callable(getter):
+            platform_id = str(getter() or "").strip()
+            if platform_id:
+                return platform_id
+        return str(event.unified_msg_origin).split(":", 1)[0]
+
     def _source_allowed(self, event: AstrMessageEvent) -> bool:
         source = str(event.unified_msg_origin)
-        if source not in self._allowed_sources():
+        platform_id = self._platform_id(event)
+        if (
+            platform_id not in self._allowed_platform_ids()
+            and source not in self._allowed_sources()
+        ):
             if bool(self._config("debug", False)):
-                logger.info("WeComOCR 忽略非白名单来源：%s", source)
+                logger.info(
+                    "WeComOCR 忽略非白名单来源：platform_id=%s, umo=%s",
+                    platform_id,
+                    source,
+                )
             return False
         sender_allowlist = set(self._string_list("allowed_sender_ids"))
         return not sender_allowlist or str(event.get_sender_id()) in sender_allowlist
@@ -106,8 +131,8 @@ class WeComOCRPlugin(Star):
 
     def _configuration_errors(self) -> list[str]:
         errors: list[str] = []
-        if not self._allowed_sources():
-            errors.append("allowed_sources 为空")
+        if not self._allowed_platform_ids() and not self._allowed_sources():
+            errors.append("allowed_platform_ids 和 allowed_sources 均为空")
         if not str(self._config("baidu_api_key", "")).strip():
             errors.append("baidu_api_key 为空")
         if not str(self._config("airscript_token", "")).strip():
@@ -232,7 +257,7 @@ class WeComOCRPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def handle_workflow(self, event: AstrMessageEvent):
-        """只处理配置来源内的离校信息 OCR 填表流程。"""
+        """接管配置的平台实例或精确来源内的 OCR 填表流程。"""
         if not self._source_allowed(event):
             return
 

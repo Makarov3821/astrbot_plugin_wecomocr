@@ -1,6 +1,12 @@
 {
+  "allowed_platform_ids": {
+    "description": "允许插件接管的平台适配器实例 ID；该实例传入的所有新旧会话都会被接管（推荐）",
+    "type": "list",
+    "default": [],
+    "items": {"type": "string"}
+  },
   "allowed_sources": {
-    "description": "允许使用插件的精确消息来源（unified_msg_origin），格式通常为 平台:消息类型:会话ID；留空时拒绝全部来源",
+    "description": "额外允许的精确消息来源（unified_msg_origin）；仅需限制到特定聊天时使用，可与平台实例白名单并存",
     "type": "list",
     "default": [],
     "items": {"type": "string"}

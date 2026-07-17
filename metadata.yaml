@@ -2,7 +2,7 @@ name: astrbot_plugin_wecomocr
 display_name: 离校清单 OCR 填表
 desc: 严格执行单文件 OCR、人工确认和 WPS AirScript 填表流程。
 short_desc: 企业微信离校清单 OCR 确认与 WPS 自动填表。
-version: v1.3.1
+version: v1.4.0
 author: Makarov3821
 repo: "https://github.com/Makarov3821/astrbot_plugin_wecomocr"
 astrbot_version: ">=4.5.7,<5"

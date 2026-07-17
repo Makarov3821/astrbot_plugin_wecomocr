@@ -73,14 +73,23 @@ from astrbot_plugin_wecomocr.main import WeComOCRPlugin  # noqa: E402
 
 
 class FakeEvent:
-    unified_msg_origin = "wecom:private:one"
-
-    def __init__(self, text="", messages=None):
+    def __init__(
+        self,
+        text="",
+        messages=None,
+        unified_msg_origin="wecom:private:one",
+        platform_id=None,
+    ):
         self.message_str = text
         self.messages = messages or []
+        self.unified_msg_origin = unified_msg_origin
+        self.platform_id = platform_id or unified_msg_origin.split(":", 1)[0]
 
     def get_messages(self):
         return self.messages
+
+    def get_platform_id(self):
+        return self.platform_id
 
     def get_sender_id(self):
         return "user-one"
@@ -127,6 +136,34 @@ class PluginRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 FakeEvent(messages=[Image("/tmp/test.jpg", "test.jpg")])
             )
         )
+
+    async def test_platform_instance_whitelist_takes_over_new_umos_only(self):
+        plugin = WeComOCRPlugin(
+            Context(),
+            {"allowed_platform_ids": ["wecom-customer-service"]},
+        )
+
+        new_customer = FakeEvent(
+            text="帮助",
+            unified_msg_origin="wecom-customer-service:private:new-customer",
+        )
+        reply = await collect(plugin.handle_workflow(new_customer))
+        self.assertTrue(new_customer.stopped)
+        self.assertIn("请一次上传", reply[0])
+
+        other_adapter = FakeEvent(
+            text="帮助",
+            unified_msg_origin="another-wecom:private:new-customer",
+        )
+        reply = await collect(plugin.handle_workflow(other_adapter))
+        self.assertEqual(reply, [])
+        self.assertFalse(hasattr(other_adapter, "stopped"))
+
+    async def test_exact_source_whitelist_remains_compatible(self):
+        allowed = FakeEvent(unified_msg_origin="wecom:private:one")
+        denied = FakeEvent(unified_msg_origin="wecom:private:two")
+        self.assertTrue(self.plugin._source_allowed(allowed))
+        self.assertFalse(self.plugin._source_allowed(denied))
 
     async def test_errors_keep_session_and_exit_clears_it(self):
         key = "wecom:private:one|user-one"
